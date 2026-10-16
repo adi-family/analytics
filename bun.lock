@@ -7,6 +7,7 @@
       "devDependencies": {
         "@aws-sdk/client-firehose": "^3.700.0",
         "@aws-sdk/client-s3": "^3.700.0",
+        "@ghostery/adblocker": "^2.20.1",
         "@types/bun": "^1.3.0",
         "typescript": "^5.6.0",
       },
@@ -51,6 +52,26 @@
 
     "@aws/lambda-invoke-store": ["@aws/lambda-invoke-store@0.3.0", "", {}, "sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ=="],
 
+    "@ghostery/adblocker": ["@ghostery/adblocker@2.20.1", "", { "dependencies": { "@ghostery/adblocker-content": "^2.20.1", "@ghostery/adblocker-extended-selectors": "^2.20.1", "@ghostery/url-parser": "^1.3.1", "@remusao/guess-url-type": "^2.1.0", "@remusao/small": "^2.1.0", "@remusao/smaz": "^2.2.0", "tldts-experimental": "^7.4.10" } }, "sha512-1ghCrMnWRf/CWQ5PMw7ZxL4W0U390gmko8kPXhwm7zi+4GDOR49JlHVvmCke90E2hCpBIoNdS5jtNlIKalp2Ww=="],
+
+    "@ghostery/adblocker-content": ["@ghostery/adblocker-content@2.20.1", "", { "dependencies": { "@ghostery/adblocker-extended-selectors": "^2.20.1" } }, "sha512-1vBDzEzoi4ZE9xjL3akAn0PiIA2KIeQ1K0JCpRIjPPWy8GoqN1saV2Md2jRSZPuXv9iENMKRPn1TetEE0MbUXw=="],
+
+    "@ghostery/adblocker-extended-selectors": ["@ghostery/adblocker-extended-selectors@2.20.1", "", {}, "sha512-PCnELdIoylSQ8hsRXQUkiSnch6WwHTNYxu8iAthmbOD+44WoXnmjR+Zfgdut3Lh3xUZmvv1uojslNIhYrJX9rA=="],
+
+    "@ghostery/url-parser": ["@ghostery/url-parser@1.3.1", "", { "dependencies": { "tldts-experimental": "^7.0.8" } }, "sha512-QKqGi+7aDQ4RcyHyCwgEk6B9vWnsBP4Q7htaN0zPJV3ATqTKEQDtSTb9c/AN586oJUDs24YXKcwFYwNweY/YjQ=="],
+
+    "@remusao/guess-url-type": ["@remusao/guess-url-type@2.1.0", "", {}, "sha512-zI3dlTUxpjvx2GCxp9nLOSK5yEIqDCpxlAVGwb2Y49RKkS72oeNaxxo+VWS5+XQ5+Mf8Zfp9ZXIlk+G5eoEN8A=="],
+
+    "@remusao/small": ["@remusao/small@2.1.0", "", {}, "sha512-Y1kyjZp7JU7dXdyOdxHVNfoTr1XLZJTyQP36/esZUU/WRWq9XY0PV2HsE3CsIHuaTf4pvgWv2pvzvnZ//UHIJQ=="],
+
+    "@remusao/smaz": ["@remusao/smaz@2.2.0", "", { "dependencies": { "@remusao/smaz-compress": "^2.2.0", "@remusao/smaz-decompress": "^2.2.0" } }, "sha512-eSd3Qs0ELP/e7tU1SI5RWXcCn9KjDgvBY+KtWbL4i2QvvHhJOfdIt4v0AA3S5BbLWAr5dCEC7C4LUfogDm6q/Q=="],
+
+    "@remusao/smaz-compress": ["@remusao/smaz-compress@2.2.0", "", { "dependencies": { "@remusao/trie": "^2.1.0" } }, "sha512-TXpTPgILRUYOt2rEe0+9PC12xULPvBqeMpmipzB9A7oM4fa9Ztvy9lLYzPTd7tiQEeoNa1pmxihpKfJtsxnM/w=="],
+
+    "@remusao/smaz-decompress": ["@remusao/smaz-decompress@2.2.0", "", {}, "sha512-ERAPwxPaA0/yg4hkNU7T2S+lnp9jj1sApcQMtOyROvOQyo+Zuh6Hn/oRcXr8mmjlYzyRaC7E6r3mT1nrdHR6pg=="],
+
+    "@remusao/trie": ["@remusao/trie@2.1.0", "", {}, "sha512-Er3Q8q0/2OcCJPQYJOPLmCuqO0wu7cav3SPtpjlxSbjFi1x+A1pZkkLD6c9q2rGEkGW/tkrRzfrhNMt8VQjzXg=="],
+
     "@smithy/core": ["@smithy/core@3.36.0", "", { "dependencies": { "@smithy/types": "^4.19.0", "tslib": "^2.6.2" } }, "sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g=="],
 
     "@smithy/credential-provider-imds": ["@smithy/credential-provider-imds@4.5.2", "", { "dependencies": { "@smithy/core": "^3.33.2", "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg=="],
@@ -70,6 +91,10 @@
     "bowser": ["bowser@2.14.1", "", {}, "sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg=="],
 
     "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
+
+    "tldts-core": ["tldts-core@7.4.18", "", {}, "sha512-KI2PKvCmvQI/xD6ypPqkU0i7oxNXR/O58RLRaHR4svsgVUQ2JE/XC8BtMbG6PSehD27I8sZJRcC1ASnCy6lp3g=="],
+
+    "tldts-experimental": ["tldts-experimental@7.4.18", "", { "dependencies": { "tldts-core": "^7.4.18" } }, "sha512-IErxVvjgDme6GfcjahlKkVpjgrtvOIzUs8oSc9vftTjFen8/R+oKlBlJ1jIY/ffVo/eYAZVzf3he/aBC304PyQ=="],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 

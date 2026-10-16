@@ -1,0 +1,11 @@
+! Snapshot of https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext
+! Fetched 2026-10-16
+! 8 of 3569 rules kept (see scripts/refresh-blocklists.ts)
+||adzerk.s3.amazonaws.com^
+||alexa-sitestats.s3.amazonaws.com^
+||digital-ads.s3.amazonaws.com^
+||entrecard.s3.amazonaws.com^
+||mobileanalytics.us-east-1.amazonaws.com^
+||pc-tc.s3-eu-west-1.amazonaws.com^
+||surveygizmobeacon.s3.amazonaws.com^
+||yab-adimages.s3.amazonaws.com^

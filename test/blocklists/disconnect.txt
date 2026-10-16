@@ -1,0 +1,6 @@
+! Snapshot of https://raw.githubusercontent.com/disconnectme/disconnect-tracking-protection/master/services.json
+! Fetched 2026-10-16
+! 3 of 4817 rules kept (see scripts/refresh-blocklists.ts)
+||s3-ap-southeast-1.amazonaws.com^
+||s3.amazonaws.com^
+||s3.us-west-2.amazonaws.com^

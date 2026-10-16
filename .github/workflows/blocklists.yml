@@ -1,0 +1,16 @@
+name: blocklists
+# Weekly: re-fetch the live filter lists and fail if any new rule would block the collector.
+# The vendored snapshot in test/blocklists/ is not committed from here; refresh it locally.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+jobs:
+  live-lists:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run refresh-blocklists
+      - run: bun run build:snippet && bun test test/blocklists.test.ts

@@ -1,0 +1,18 @@
+! Snapshot of https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-specific.txt
+! Fetched 2026-10-16
+! 15 of 81 rules kept (see scripts/refresh-blocklists.ts)
+.com/cuid/?
+.top/cuid/?
+.shop/opf/
+.shop/cuid/
+.shop/gd/
+.shop/sbx/
+.click/tsk/
+.click/opf/
+.click/gd/
+.com/tsf/
+.top/gd/*?md=
+/push/i?clk
+/script/ut.js
+/suurl5.php?
+/alm73cDylLvk1rXd1brtznfe1baIUT5.js
