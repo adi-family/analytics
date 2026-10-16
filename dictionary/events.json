@@ -1,0 +1,358 @@
+{
+  "$comment": "The allowlist. An event or property not listed here is rejected by the collector. Generated from mb_events by scripts/sync-dictionary.ts; hand edits are allowed.",
+  "common": {
+    "app": {
+      "version": {
+        "type": "token"
+      },
+      "os": {
+        "type": "enum",
+        "values": [
+          "macos",
+          "linux",
+          "windows"
+        ]
+      },
+      "arch": {
+        "type": "token"
+      }
+    }
+  },
+  "events": {
+    "page_view": {
+      "layer": "site",
+      "funnel": "individuals",
+      "consent": "cookieless",
+      "description": "Every page load on withadi.dev. Before the banner is answered or after Reject: sent with in-memory persistence, so no cookie and a fresh id per page.",
+      "properties": {
+        "path": {
+          "type": "path"
+        },
+        "utm_source": {
+          "type": "string",
+          "optional": true
+        },
+        "utm_medium": {
+          "type": "string",
+          "optional": true
+        },
+        "utm_campaign": {
+          "type": "string",
+          "optional": true
+        },
+        "referring_domain": {
+          "type": "hostname",
+          "optional": true
+        }
+      }
+    },
+    "download_clicked": {
+      "layer": "site",
+      "funnel": "individuals",
+      "consent": "cookieless",
+      "description": "Click on one of the three download rows.",
+      "properties": {
+        "platform": {
+          "type": "enum",
+          "values": [
+            "macos",
+            "linux",
+            "windows"
+          ]
+        },
+        "path": {
+          "type": "path"
+        }
+      }
+    },
+    "sales_mail_clicked": {
+      "layer": "site",
+      "funnel": "companies",
+      "consent": "cookieless",
+      "description": "Click on any mailto:sales@withadi.dev link.",
+      "properties": {
+        "intent": {
+          "type": "enum",
+          "values": [
+            "walkthrough",
+            "write",
+            "referral",
+            "over_ten"
+          ]
+        },
+        "path": {
+          "type": "path"
+        }
+      }
+    },
+    "app_linked": {
+      "layer": "site",
+      "funnel": "individuals",
+      "consent": "required",
+      "description": "The person opens withadi.dev/welcome/?i=<install_id> from the link on the app's first-run screen, and has accepted the banner.",
+      "properties": {
+        "source": {
+          "type": "enum",
+          "values": [
+            "welcome_link"
+          ]
+        }
+      }
+    },
+    "app_first_launch": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "The first start of adi-app with usage events on and no analytics state yet: the install_id is minted then.",
+      "properties": {
+        "fresh": {
+          "type": "bool"
+        }
+      }
+    },
+    "onboarding_completed": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "The root agent's definition is saved for the first time (the wizard's Save).",
+      "properties": {
+        "backend": {
+          "type": "token"
+        }
+      }
+    },
+    "agent_run_started": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "An agent run launches. Sent per run only for the first 7 days after app_first_launch; after that, only counted in app_daily_active.",
+      "properties": {
+        "launched_by": {
+          "type": "enum",
+          "values": [
+            "human",
+            "agent",
+            "automation"
+          ]
+        },
+        "backend": {
+          "type": "token"
+        }
+      }
+    },
+    "agent_run_finished": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "A run is really finished (not idle). The same 7-day window as agent_run_started.",
+      "properties": {
+        "is_error": {
+          "type": "bool"
+        },
+        "terminal_reason": {
+          "type": "string",
+          "optional": true
+        },
+        "launched_by": {
+          "type": "enum",
+          "values": [
+            "human",
+            "agent",
+            "automation"
+          ]
+        }
+      }
+    },
+    "app_daily_active": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "Once per local calendar day that adi-app is running.",
+      "properties": {
+        "runs_human": {
+          "type": "int"
+        },
+        "runs_agent": {
+          "type": "int"
+        },
+        "runs_automation": {
+          "type": "int"
+        }
+      }
+    },
+    "dashboard_created": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "POST /api/dashboards/create or /import succeeds.",
+      "properties": {
+        "from": {
+          "type": "enum",
+          "values": [
+            "blank",
+            "import"
+          ]
+        }
+      }
+    },
+    "store_item_installed": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "A marketplace install succeeds.",
+      "properties": {
+        "kind": {
+          "type": "enum",
+          "values": [
+            "agent",
+            "tool",
+            "dashboard",
+            "service"
+          ]
+        },
+        "slug": {
+          "type": "slug",
+          "optional": true
+        }
+      }
+    },
+    "fleet_invite_created": {
+      "layer": "app",
+      "funnel": "individuals",
+      "description": "A fleet/mesh invite is minted.",
+      "properties": {}
+    },
+    "licence_code_entered": {
+      "layer": "app",
+      "funnel": "companies",
+      "description": "A licence code is entered in the enterprise build.",
+      "properties": {
+        "status": {
+          "type": "token"
+        }
+      }
+    },
+    "crm_company_added": {
+      "layer": "server-crm",
+      "funnel": "companies",
+      "description": "A company row is inserted in the CRM.",
+      "properties": {
+        "origin": {
+          "type": "enum",
+          "values": [
+            "outbound",
+            "inbound",
+            "referral",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "crm_message_logged": {
+      "layer": "server-crm",
+      "funnel": "companies",
+      "description": "A crm_messages row is written: a send, a draft sent, or a reply logged by hand.",
+      "properties": {
+        "direction": {
+          "type": "enum",
+          "values": [
+            "in",
+            "out"
+          ]
+        },
+        "channel_kind": {
+          "type": "enum",
+          "values": [
+            "email",
+            "linkedin",
+            "other"
+          ]
+        }
+      }
+    },
+    "crm_stage_changed": {
+      "layer": "server-crm",
+      "funnel": "companies",
+      "description": "A company's funnel stage changes in the CRM.",
+      "properties": {
+        "from_stage": {
+          "type": "enum",
+          "values": [
+            "target",
+            "first_touch",
+            "conversation",
+            "pilot",
+            "purchase",
+            "retain",
+            "lost"
+          ]
+        },
+        "to_stage": {
+          "type": "enum",
+          "values": [
+            "target",
+            "first_touch",
+            "conversation",
+            "pilot",
+            "purchase",
+            "retain",
+            "lost"
+          ]
+        },
+        "referred": {
+          "type": "bool"
+        }
+      }
+    },
+    "crm_referral_logged": {
+      "layer": "server-crm",
+      "funnel": "referral",
+      "description": "A referral is recorded against a company in the CRM.",
+      "properties": {
+        "referrer_kind": {
+          "type": "enum",
+          "values": [
+            "customer",
+            "individual",
+            "partner",
+            "consultant"
+          ]
+        },
+        "payout": {
+          "type": "enum",
+          "values": [
+            "cash",
+            "credit",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "licence_issued": {
+      "layer": "server-licence",
+      "funnel": "companies",
+      "description": "An admin issues a paid licence or a trial.",
+      "properties": {
+        "kind": {
+          "type": "enum",
+          "values": [
+            "paid",
+            "trialing"
+          ]
+        },
+        "max_deployments": {
+          "type": "int"
+        },
+        "referred": {
+          "type": "bool"
+        }
+      }
+    },
+    "licence_activated": {
+      "layer": "server-licence",
+      "funnel": "companies",
+      "description": "The first accepted beam from a deployment that is new to a licence (the insert into deployments).",
+      "properties": {
+        "status": {
+          "type": "token"
+        },
+        "first_for_licence": {
+          "type": "bool"
+        }
+      }
+    }
+  }
+}
