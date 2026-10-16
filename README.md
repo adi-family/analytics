@@ -16,10 +16,12 @@ it was not told to expect.
 - For browser events: the browser family (`chrome`, `firefox`, `safari`…), OS family
   (`macos`, `windows`, `ios`…) and device class (`desktop`, `mobile`, `tablet`). No versions.
 - Ids:
-  - `anonymous_id`: a random UUID in the first-party cookie `adi_aid` (1 year,
+  - `anonymous_id`: a random UUID in the first-party cookie `adi_id` (1 year,
     `Domain=.withadi.dev`, `SameSite=Lax`, `Secure`). It is set **only after consent**.
-  - `distinct_id`: a known id after `identify`. That is the app's random `install_id`, or
-    a CRM id such as `crm:company:42`.
+    The browser sends it as `browser_id`.
+  - `distinct_id`: a known id after a link (`adi.link(id)`, `POST /v1/link`). That is the
+    app's random `install_id`, or a CRM id such as `crm:company:42`. The browser keeps it
+    in the cookie `adi_link` and sends it as `known_id`.
   - `groups`: `company` and `deployment` keys on app and server events.
 - Timestamps: the client's time (clamped to the last 30 days) and the arrival time.
 
@@ -34,8 +36,7 @@ it was not told to expect.
 - No fingerprinting, no third-party cookies, no localStorage.
 - **Before consent:** no cookie and no id at all. Cookieless events are stored with
   `anonymous_id = null`, even if a page sends one, so they cannot be joined into a person.
-  Events marked `consent: required` are refused without consent, and `identify` is refused
-  without consent.
+  Events marked `consent: required` are refused without consent, and so is a link.
 - **Global Privacy Control / Do-Not-Track:** the snippet sends nothing, and the collector
   also drops any browser request that carries `Sec-GPC: 1` or `DNT: 1`.
 - Obvious bots (by User-Agent) are dropped.
@@ -87,9 +88,9 @@ sqlite3 -json "$(adi-db path --project adi-marketing-branch)" \
 ```
 browser snippet ─┐
 desktop app ─────┼─► API Gateway HTTP API ─► Lambda (Node 22, arm64) ─► Firehose ─► S3
-CRM / licence ───┘   (t.withadi.dev)          validate, strip, enrich      (5 min / 5 MB buffer)
+CRM / licence ───┘  (relay.withadi.dev)       validate, strip, enrich      (5 min / 5 MB buffer)
                                                        │                   events/dt=YYYY-MM-DD/*.gz
-ADI ◄── GET /export ◄──────────────────────────────────┘                    │
+ADI ◄── GET /v1/pull ◄─────────────────────────────────┘                    │
                                                          Glue table + Athena workgroup (ad-hoc SQL)
 ```
 
@@ -106,54 +107,79 @@ ADI ◄── GET /export ◄─────────────────
 
 ## Endpoints
 
+Every client-visible name is in [`src/surface.ts`](src/surface.ts). Read
+[Not blocked by content blockers](#not-blocked-by-content-blockers) before you rename one.
 All bodies are JSON. `text/plain` is accepted too, so the browser needs no CORS preflight.
 
 | Route | Who | Auth |
 |---|---|---|
-| `POST /e` | browser (site events) or desktop app (app events) | allowed `Origin` → site events only; no `Origin` → app events only; any other `Origin` → 403 |
-| `POST /s` | CRM, licence service (server events) | `Authorization: Bearer <write key>` |
-| `POST /identify` | browser (with consent) or a server | allowed `Origin`, or the write key |
-| `GET /export?since=<cursor>` | ADI | `Authorization: Bearer <export key>` |
-| `GET /a.js` | the snippet | none |
+| `POST /v1/web` | browser on withadi.dev (site events) | an allowed `Origin`; no `Origin` or a foreign one → 403 |
+| `POST /v1/app` | desktop app (app events) | no `Origin` (a page → 403) |
+| `POST /v1/server` | CRM, licence service (server events) | `Authorization: Bearer <write key>` |
+| `POST /v1/link` | browser (with consent) or a server: alias a browser id to a known id | allowed `Origin`, or the write key |
+| `GET /v1/pull?since=<cursor>` | ADI | `Authorization: Bearer <export key>` |
+| `GET /web.js` | the snippet | none |
 | `GET /health` | monitoring | none |
 
-Each route accepts only its own layers. A site event sent to `/s`, or a CRM event sent to
-`/e`, is rejected.
+Each route accepts only its own layers. A site event sent to `/v1/server`, or a CRM event
+sent to `/v1/web`, is rejected.
 
-### POST /e, POST /s
+### POST /v1/web (the browser's wire format)
+
+The browser uses plain field names, so that nothing it sends reads like a tracker:
 
 ```json
 {
   "consent": true,
-  "anonymous_id": "0b7e6c1e-3f9a-4c2d-9b1a-2f6e8d4c5a71",
+  "browser_id": "0b7e6c1e-3f9a-4c2d-9b1a-2f6e8d4c5a71",
+  "known_id": "5f0c2a8e-1b3d-4e6f-8a9b-0c1d2e3f4a5b",
+  "items": [
+    { "name": "download_clicked", "props": { "platform": "macos", "path": "/" },
+      "at": "2026-10-16T12:00:00Z", "id": "<uuid, optional, for retries>" }
+  ]
+}
+```
+
+- `consent`, `browser_id` and `known_id` are batch-level. Without `consent: true` both
+  ids are dropped. Any other field is refused.
+- They are stored as `anonymous_id`, `distinct_id`, `event`, `properties` and `ts`.
+
+### POST /v1/app, POST /v1/server (record names)
+
+```json
+{
   "distinct_id": "5f0c2a8e-1b3d-4e6f-8a9b-0c1d2e3f4a5b",
   "events": [
-    { "event": "download_clicked", "properties": { "platform": "macos", "path": "/" },
+    { "event": "app_first_launch", "properties": { "fresh": true, "version": "1.30.0", "os": "linux", "arch": "x86_64" },
       "ts": "2026-10-16T12:00:00Z", "id": "<uuid, optional, for retries>" }
   ]
 }
 ```
 
-- Browser: `consent` and `anonymous_id` are batch-level. Without `consent: true` both ids are dropped.
 - App: `distinct_id` = the install_id (UUID) is required, there is no `anonymous_id`, and
   `groups` is optional.
 - Server: `distinct_id` may be set per event, and `groups: {company, deployment}` is optional.
-- Limits: browser 50 events / 32 KB, app 100 / 64 KB, server 500 / 256 KB.
-- Answer: `200 {"accepted": n, "rejected": [{index, event, errors}]}`. When nothing is
+
+For every batch route:
+
+- Limits: browser 50 items / 32 KB, app 100 / 64 KB, server 500 / 256 KB.
+- Answer: `200 {"accepted": n, "rejected": [{index, name, errors}]}`. When nothing is
   accepted the answer is `400`. Envelope errors are `400`/`413`, a bad key is `401`, a
-  foreign origin is `403`, and the rate limit is `429`. Opted-out and bot requests get
-  `200 {"accepted":0,"dropped":...}` so that nothing retries.
+  wrong caller for the route is `403`, and the rate limit is `429`. Opted-out and bot
+  requests get `200 {"accepted":0,"dropped":...}` so that nothing retries.
 
-### POST /identify
+### POST /v1/link
 
-`{"consent": true, "anonymous_id": "<uuid>", "distinct_id": "<known id>"}` stores an
-`identify` record. From now on, that anonymous id belongs to that distinct id. ADI applies
-the alias when it builds people and funnels. Stored events are never rewritten.
+From the browser: `{"consent": true, "browser_id": "<uuid>", "known_id": "<known id>"}`.
+From a server with the write key: `{"anonymous_id": "<uuid>", "distinct_id": "<known id>"}`.
+Either stores an `identify` record. From now on, that anonymous id belongs to that
+distinct id. ADI applies the alias when it builds people and funnels. Stored events are
+never rewritten.
 
-### GET /export: the contract for ADI
+### GET /v1/pull: the contract for ADI
 
 ```
-GET /export?since=<cursor | YYYY-MM-DD | empty>
+GET /v1/pull?since=<cursor | YYYY-MM-DD | empty>
 Authorization: Bearer <export key>
 
 200 {"ok": true, "records": [<record>, ...], "cursor": "<opaque>", "more": true|false}
@@ -169,7 +195,7 @@ Authorization: Bearer <export key>
   tables `analytics_events` (upsert on `id`) and `analytics_cursor` in any SQLite file:
 
   ```sh
-  ANALYTICS_URL=https://t.withadi.dev ANALYTICS_EXPORT_KEY=... \
+  ANALYTICS_URL=https://relay.withadi.dev ANALYTICS_EXPORT_KEY=... \
     bun clients/adi-pull.ts "$(adi-db path --project adi-analytics)"
   ```
 
@@ -201,26 +227,73 @@ from events where event = 'download_clicked' group by 1;
 ## The browser snippet
 
 ```html
-<script async src="https://t.withadi.dev/a.js"></script>
+<script async src="https://relay.withadi.dev/web.js"></script>
 <script>
   // after the banner: adi.consent(true) or adi.consent(false)
-  // adi.track("download_clicked", { platform: "macos", path: location.pathname })
-  // on /welcome/?i=<install_id>, after consent: adi.identify(installId)
+  // adi.send("download_clicked", { platform: "macos", path: location.pathname })
+  // on /welcome/?i=<install_id>, after consent: adi.link(installId)
 </script>
 ```
 
 - It is about 1.2 KB gzipped and has no dependencies. It sends one `page_view` per load
-  (`data-pageview="false"` turns that off) and only what the page calls with `adi.track`.
+  (`data-pageview="false"` turns that off) and only what the page calls with `adi.send`.
+- API: `adi.send(name, props)`, `adi.link(id)`, `adi.consent(bool)`, `adi.page()`.
 - Consent: until `adi.consent(true)`, nothing is stored and no id is sent.
-  `adi.consent(false)` deletes `adi_aid` and `adi_did`. A visitor who already has `adi_aid`
+  `adi.consent(false)` deletes `adi_id` and `adi_link`. A visitor who already has `adi_id`
   counts as having consented.
 - GPC / DNT: it does nothing at all.
+- Transport: `fetch` with `keepalive`, never `navigator.sendBeacon` (see below).
 - Options: `data-endpoint` (default: the script's origin), `data-cookie-domain`
   (default `.withadi.dev`), `data-consent="true"`.
-- Calls made before it loads can be queued: `window.adi = {q: [["track", "…", {…}]]}`.
+- Calls made before it loads can be queued: `window.adi = {q: [["send", "…", {…}]]}`.
+- Safari caps cookies written by script at 7 days, so a Safari visitor who does not come
+  back within a week gets a new `adi_id`. Funnels across longer gaps rely on a link.
 
 Embedding it on withadi.dev is a separate step. The privacy page must say what is collected
 before tracking starts.
+
+## Not blocked by content blockers
+
+The collector is first party and selective, and it should not be caught by filters written
+for third-party trackers. Everything a browser or a DNS blocker can see is named in plain
+words: the host `relay.withadi.dev`, the paths above, `web.js`, `window.adi` with
+`send`/`link`/`consent`/`page`, the cookies `adi_id`/`adi_link` and the wire fields. None
+of them contains a tracker word (analytics, track, collect, event, pixel, beacon, telemetry,
+metric, stats, identify…). AWS resource names keep the `adi-analytics` prefix, because no
+browser sees them.
+
+Audit of 2026-10-16, against EasyList, EasyPrivacy, uBlock filters (+ privacy, badware,
+quick fixes), AdGuard Base, Tracking Protection, URL Tracking, DNS filter and CNAME-tracker
+list, Peter Lowe's list, Disconnect (Firefox Enhanced Tracking Protection) and Brave's own
+lists, using a real filter engine:
+
+- **uBlock Origin on Firefox uncloaks CNAMEs.** It re-checks every request as if it went to
+  `d-….execute-api.<region>.amazonaws.com`, which is third party to withadi.dev. Rules found
+  there: `*$ping,third-party` (EasyPrivacy) blocks every `sendBeacon`, so the snippet uses
+  `fetch(keepalive)`. `||execute-api.*.amazonaws.com/event|` (AdGuard) and
+  `||amazonaws.com/beacon^`, `||amazonaws.com/analytics/` (EasyPrivacy) rule out those path
+  names.
+- No list names withadi.dev or an API Gateway host we use. Header, cookie and generic
+  scriptlet rules do not touch our names. Body-matching scriptlets (`no-fetch-if body:`)
+  exist only for specific sites.
+- The old names (`t.withadi.dev`, `/e`, `/a.js`, `adi.track`, `adi_aid`) did not hit a rule
+  directly, but they read as tracker names and `sendBeacon` was blocked once uncloaked.
+
+[`test/blocklists.test.ts`](test/blocklists.test.ts) keeps it that way. It runs every
+client-visible URL, as `script`/`xhr`/`fetch`/`other` from withadi.dev pages, on our host
+and on both API Gateway hosts, through
+[`@ghostery/adblocker`](https://github.com/ghostery/adblocker) loaded with a vendored, dated
+snapshot of those lists in [`test/blocklists/`](test/blocklists/). The snapshot holds only
+the rules that could ever apply: generic and regex rules, and rules anchored on withadi.dev,
+amazonaws.com or on.aws. Known tracker URLs serve as controls, so a broken snapshot fails
+loudly. Refresh it with:
+
+```sh
+bun run refresh-blocklists && bun run test   # then commit test/blocklists/
+```
+
+A weekly CI job does the same against the live lists and fails if a new rule would block
+us.
 
 ## Deploy
 
@@ -237,12 +310,12 @@ AWS_REGION=eu-central-1 infra/teardown.sh --yes  # delete everything, including 
   `.deploy/keys.env` (mode 600, gitignored). Store them in your secret manager, then delete
   the file. Only their SHA-256 hashes reach AWS. To rotate a key, pass
   `ANALYTICS_WRITE_KEY=…` / `ANALYTICS_EXPORT_KEY=…` to `deploy.sh`.
-- **Custom domain `t.withadi.dev`** (DNS on Cloudflare, DNS-only CNAME):
+- **Custom domain `relay.withadi.dev`** (DNS on Cloudflare, DNS-only CNAME):
   ```sh
-  export DOMAIN=t.withadi.dev CLOUDFLARE_API_TOKEN=...
+  export DOMAIN=relay.withadi.dev CLOUDFLARE_API_TOKEN=...
   infra/domain.sh cert                     # ACM cert + validation CNAME, waits until issued; prints CERT_ARN
   CERT_ARN=arn:... infra/deploy.sh         # adds the API Gateway custom domain
-  infra/domain.sh dns                      # CNAME t.withadi.dev -> the regional API Gateway target
+  infra/domain.sh dns                      # CNAME relay.withadi.dev -> the regional API Gateway target
   ```
 - **Deploy user.** [`infra/deploy-policy.json`](infra/deploy-policy.json) is a least-privilege
   policy for a dedicated IAM user. Create it as a *customer managed* policy, because it is
@@ -266,7 +339,7 @@ Athena costs $5 per TB scanned, and the workgroup caps each query at 1 GB.
 
 ```sh
 bun install
-bun run test        # builds the snippet, then 59 tests: validation, identity, routes, export, snippet, pull
+bun run test        # builds the snippet, then 74 tests: validation, identity, routes, export, snippet, pull, blocklists
 bun run typecheck
 ANALYTICS_WRITE_KEY=... ANALYTICS_EXPORT_KEY=... bun run dev   # local collector on :8787, writes to .dev/
 API=http://localhost:8787 ANALYTICS_WRITE_KEY=... ANALYTICS_EXPORT_KEY=... WAIT=1 infra/smoke.sh
