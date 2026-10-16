@@ -317,10 +317,19 @@ AWS_REGION=eu-central-1 infra/teardown.sh --yes  # delete everything, including 
   CERT_ARN=arn:... infra/deploy.sh         # adds the API Gateway custom domain
   infra/domain.sh dns                      # CNAME relay.withadi.dev -> the regional API Gateway target
   ```
+  For a few minutes after the domain is attached, some API Gateway front ends still present
+  their default certificate. Until that clears, curl fails with "no alternative certificate
+  subject name matches".
 - **Deploy user.** [`infra/deploy-policy.json`](infra/deploy-policy.json) is a least-privilege
   policy for a dedicated IAM user. Create it as a *customer managed* policy, because it is
   larger than the 2 KB inline limit. It is scoped to resources named `adi-analytics*` and
-  assumes the default stack name.
+  assumes the default stack name. It was checked against CloudTrail for a real deploy and
+  with the IAM policy simulator. A few actions fall outside the prefix:
+  - `iam:CreateServiceLinkedRole`, limited to API Gateway's `ops.apigateway` role. API Gateway
+    creates that role the first time an account gets a custom domain.
+  - Account-level reads that only accept `*`: `iam:GetAccountSummary`,
+    `lambda:GetAccountSettings` and `logs:Describe*`. CloudFormation calls them.
+  - ACM. A certificate ARN is not known before it is requested.
 
 ## Cost
 
