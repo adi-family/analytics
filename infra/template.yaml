@@ -1,0 +1,390 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ADI analytics collector: API Gateway HTTP API -> Lambda (Node 22, arm64) -> Firehose -> S3
+  (gzip JSONL by date), with a Glue table and an Athena workgroup for ad-hoc SQL. Nothing here
+  costs money while idle except S3 storage of what was collected.
+
+Parameters:
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: https://withadi.dev,https://www.withadi.dev
+    Description: Browser origins allowed to send site events (CORS and a server-side Origin check).
+  WriteKeyHashes:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Comma-separated SHA-256 hex hashes of the server write keys (POST /s, server /identify).
+  ExportKeyHashes:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Comma-separated SHA-256 hex hashes of the export keys (GET /export).
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Custom hostname, e.g. t.withadi.dev. Empty = only the execute-api URL.
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate for DomainName, in this region. Required when DomainName is set.
+  RawRetentionDays:
+    Type: Number
+    Default: 395
+    MinValue: 1
+    Description: Days raw events are kept in S3 before the lifecycle rule deletes them.
+  ThrottleRate:
+    Type: Number
+    Default: 50
+    Description: Steady-state requests per second for the whole API.
+  ThrottleBurst:
+    Type: Number
+    Default: 100
+    Description: Burst requests for the whole API.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+  GlueDatabaseName:
+    Type: String
+    Default: adi_analytics
+    AllowedPattern: "[a-z][a-z0-9_]*"
+
+Conditions:
+  HasDomain: !And
+    - !Not [!Equals [!Ref DomainName, ""]]
+    - !Not [!Equals [!Ref CertificateArn, ""]]
+
+Resources:
+  EventsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-raw-events
+            Status: Enabled
+            Prefix: events/
+            ExpirationInDays: !Ref RawRetentionDays
+          - Id: expire-delivery-errors
+            Status: Enabled
+            Prefix: errors/
+            ExpirationInDays: 30
+          - Id: expire-athena-results
+            Status: Enabled
+            Prefix: athena-results/
+            ExpirationInDays: 7
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  EventsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EventsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt EventsBucket.Arn
+              - !Sub "${EventsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: firehose.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: write-events
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt EventsBucket.Arn
+                  - !Sub "${EventsBucket.Arn}/*"
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: !Sub "${AWS::StackName}-events"
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt EventsBucket.Arn
+        RoleARN: !GetAtt FirehoseRole.Arn
+        Prefix: "events/dt=!{timestamp:yyyy-MM-dd}/"
+        ErrorOutputPrefix: "errors/!{firehose:error-output-type}/dt=!{timestamp:yyyy-MM-dd}/"
+        CompressionFormat: GZIP
+        BufferingHints:
+          IntervalInSeconds: 300
+          SizeInMBs: 5
+
+  CollectorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-collector"
+      RetentionInDays: !Ref LogRetentionDays
+
+  CollectorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: collector
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${CollectorLogGroup.Arn}:*"
+              - Effect: Allow
+                Action: [firehose:PutRecord, firehose:PutRecordBatch]
+                Resource: !GetAtt DeliveryStream.Arn
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt EventsBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: ["events/*"]
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${EventsBucket.Arn}/events/*"
+
+  # The real code is uploaded by infra/deploy.sh (aws lambda update-function-code) right after
+  # the stack deploys, so no artifact bucket is needed. This stub only answers until then.
+  CollectorFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CollectorLogGroup
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-collector"
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 10
+      Role: !GetAtt CollectorRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"code not uploaded yet"}' });
+      Environment:
+        Variables:
+          FIREHOSE_STREAM: !Ref DeliveryStream
+          EVENTS_BUCKET: !Ref EventsBucket
+          ALLOWED_ORIGINS: !Join [",", !Ref AllowedOrigins]
+          WRITE_KEY_HASHES: !Ref WriteKeyHashes
+          EXPORT_KEY_HASHES: !Ref ExportKeyHashes
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Ref AWS::StackName
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowMethods: [GET, POST]
+        AllowHeaders: [content-type]
+        MaxAge: 86400
+
+  CollectorIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CollectorFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  RouteEvents:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /e
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteServer:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /s
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteIdentify:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /identify
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteExport:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /export
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteSnippet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /a.js
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteHealth:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /health
+      Target: !Sub "integrations/${CollectorIntegration}"
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottleRate
+        ThrottlingBurstLimit: !Ref ThrottleBurst
+
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CollectorFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*"
+
+  CustomDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasDomain
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  CustomDomainMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasDomain
+    DependsOn: DefaultStage
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref CustomDomain
+      Stage: $default
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseName
+        Description: ADI analytics events (raw, as collected)
+
+  # Partition projection: no crawler and no MSCK REPAIR; every dt from the start date is queryable.
+  EventsTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref GlueDatabase
+      TableInput:
+        Name: events
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: json
+          projection.enabled: "true"
+          projection.dt.type: date
+          projection.dt.format: yyyy-MM-dd
+          projection.dt.range: "2026-10-01,NOW"
+          projection.dt.interval: "1"
+          projection.dt.interval.unit: DAYS
+          storage.location.template: !Sub "s3://${EventsBucket}/events/dt=${!dt}/"
+        PartitionKeys:
+          - { Name: dt, Type: string }
+        StorageDescriptor:
+          Location: !Sub "s3://${EventsBucket}/events/"
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+            Parameters:
+              ignore.malformed.json: "true"
+          Columns:
+            - { Name: v, Type: int }
+            - { Name: type, Type: string }
+            - { Name: id, Type: string }
+            - { Name: event, Type: string }
+            - { Name: layer, Type: string }
+            - { Name: ts, Type: string }
+            - { Name: received_at, Type: string }
+            - { Name: anonymous_id, Type: string }
+            - { Name: distinct_id, Type: string }
+            - { Name: consent, Type: boolean }
+            - { Name: properties, Type: string, Comment: "JSON object; use json_extract_scalar" }
+            - { Name: groups, Type: string, Comment: "JSON object or null" }
+            - { Name: ua_browser, Type: string }
+            - { Name: ua_os, Type: string }
+            - { Name: ua_device, Type: string }
+
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Ref AWS::StackName
+      RecursiveDeleteOption: true
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: false
+        BytesScannedCutoffPerQuery: 1073741824
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${EventsBucket}/athena-results/"
+
+Outputs:
+  ApiEndpoint:
+    Value: !GetAtt HttpApi.ApiEndpoint
+  PublicUrl:
+    Value: !If [HasDomain, !Sub "https://${DomainName}", !GetAtt HttpApi.ApiEndpoint]
+  CustomDomainTarget:
+    Condition: HasDomain
+    Description: Point the DomainName CNAME here (DNS-only).
+    Value: !GetAtt CustomDomain.RegionalDomainName
+  FunctionName:
+    Value: !Ref CollectorFunction
+  EventsBucketName:
+    Value: !Ref EventsBucket
+  DeliveryStreamName:
+    Value: !Ref DeliveryStream
+  AthenaWorkGroupName:
+    Value: !Ref AthenaWorkGroup
+  GlueDatabaseName:
+    Value: !Ref GlueDatabase
