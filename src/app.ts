@@ -2,10 +2,11 @@
 // this, scripts/dev.ts adapts Bun.serve.
 
 import { bearer, keyMatches } from "./auth";
-import { BATCH_LIMITS, collectBatch, collectIdentify, type StoredRecord } from "./collect";
+import { BATCH_LIMITS, collectBatch, collectIdentify, RECORD_WIRE, WEB_WIRE, type StoredRecord } from "./collect";
 import { exportPage, type EventStore } from "./export";
 import type { Source } from "./identity";
 import { RateLimiter } from "./ratelimit";
+import { PULL_CURSOR, ROUTES } from "./surface";
 import { uaFamily } from "./ua";
 
 export type Req = {
@@ -64,7 +65,8 @@ export function createApp(deps: Deps) {
       : {};
 
   // Who is calling: a browser on an allowed origin, the desktop app (no Origin header),
-  // or a server holding the write key. A foreign Origin is refused outright.
+  // or a server holding the write key. A foreign Origin is refused outright. Each POST
+  // route then accepts only the callers it is for.
   function sourceOf(req: Req, allowServer: boolean): Source | Res {
     const origin = req.headers["origin"];
     const key = bearer(req.headers);
@@ -90,20 +92,25 @@ export function createApp(deps: Deps) {
         body: "",
       };
     }
-    if (route === "GET /health") return json(200, { ok: true });
-    if (route === "GET /a.js")
+    if (route === `GET ${ROUTES.health}`) return json(200, { ok: true });
+    if (route === `GET ${ROUTES.script}`)
       return {
         status: 200,
         headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" },
         body: deps.snippet,
       };
 
-    if (route === "POST /e" || route === "POST /s" || route === "POST /identify") {
+    const post = req.method === "POST" ? Object.entries(ROUTES).find(([, p]) => p === req.path)?.[0] : undefined;
+    if (post === "web" || post === "app" || post === "server" || post === "link") {
       if (!limiter.allow(req.sourceIp, now())) return json(429, { error: "slow down" }, cors);
-      const source = sourceOf(req, route !== "POST /e");
+      const source = sourceOf(req, post === "server" || post === "link");
       if (typeof source !== "string") return { ...source, headers: { ...source.headers, ...cors } };
-      if (route === "POST /s" && source !== "server") return json(401, { error: "POST /s needs the write key" }, cors);
-      if (route === "POST /identify" && source === "app") return json(401, { error: "identify needs an allowed Origin or the write key" }, cors);
+      if (post === "web" && source !== "browser") return json(403, { error: `${ROUTES.web} takes requests from an allowed Origin only` }, cors);
+      if (post === "app" && source !== "app") return json(403, { error: `${ROUTES.app} is for the desktop app` }, cors);
+      if (post === "server" && source !== "server") return json(401, { error: `${ROUTES.server} needs the write key` }, cors);
+      if (post === "link" && source === "app") return json(401, { error: `${ROUTES.link} needs an allowed Origin or the write key` }, cors);
+      // The browser speaks the plain-word wire format; the app and servers use record names.
+      const wire = source === "browser" ? WEB_WIRE : RECORD_WIRE;
 
       const ua = source === "browser" ? uaFamily(req.headers["user-agent"]) : null;
       // Browser opt-outs win over anything the page sends. Answer 200 so nothing retries.
@@ -112,22 +119,22 @@ export function createApp(deps: Deps) {
       const parsed = parse(req.body, BATCH_LIMITS[source].bytes);
       if (!parsed.ok) return { ...parsed.res, headers: { ...parsed.res.headers, ...cors } };
 
-      if (route === "POST /identify") {
-        const r = collectIdentify(source, parsed.value, { now: now() });
+      if (post === "link") {
+        const r = collectIdentify(source, parsed.value, { now: now(), wire });
         if (!r.ok) return json(r.status, { error: r.error }, cors);
         await deps.sink.put([r.record]);
         return json(200, { accepted: 1 }, cors);
       }
-      const r = collectBatch(source, parsed.value, { now: now(), ua });
+      const r = collectBatch(source, parsed.value, { now: now(), ua, wire });
       if (!r.ok) return json(r.status, { error: r.error }, cors);
       if (r.records.length) await deps.sink.put(r.records);
       const status = r.records.length === 0 ? 400 : 200;
       return json(status, { accepted: r.records.length, rejected: r.rejected }, cors);
     }
 
-    if (route === "GET /export") {
+    if (route === `GET ${ROUTES.pull}`) {
       if (!keyMatches(bearer(req.headers), config.exportKeyHashes)) return json(401, { error: "bad export key" });
-      const page = await exportPage(deps.store, req.query["since"]);
+      const page = await exportPage(deps.store, req.query[PULL_CURSOR]);
       if (!page.ok) return json(400, { error: page.error });
       return json(200, page);
     }

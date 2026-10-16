@@ -1,8 +1,10 @@
 // Identity rules. Three kinds of id exist:
-//   anonymous_id  a random UUID the browser snippet keeps in the first-party cookie adi_aid,
+//   anonymous_id  a random UUID the browser snippet keeps in the first-party cookie adi_id,
 //                 only after consent. Without consent the collector stores no id at all.
+//                 The browser sends it as browser_id.
 //   distinct_id   a known id: an app install_id (UUID), or crm:company:<id>, crm:user:<id>,
-//                 or a licence deployment_id. Linked to an anonymous_id by /identify.
+//                 or a licence deployment_id. Linked to an anonymous_id by POST /v1/link.
+//                 The browser sends it as known_id.
 //   groups        company / deployment keys on app and server events.
 // Nothing here is derived from an IP address or the hardware.
 
@@ -26,6 +28,10 @@ export const LAYERS_BY_SOURCE: Record<Source, Layer[]> = {
 
 export type Ids = { anonymous_id: string | null; distinct_id: string | null };
 
+/** What the two ids are called in the request body (they differ for the browser). */
+export type IdNames = { browserId: string; knownId: string };
+const RECORD_NAMES: IdNames = { browserId: "anonymous_id", knownId: "distinct_id" };
+
 /**
  * Resolves the ids an event is stored with, or explains why it is refused.
  * `consent` only matters for the browser: without it both ids are dropped, so a
@@ -36,13 +42,15 @@ export function resolveIds(
   consent: boolean,
   anonymousId: unknown,
   distinctId: unknown,
+  names: IdNames = RECORD_NAMES,
 ): { ok: true; ids: Ids } | { ok: false; error: string } {
-  if (anonymousId != null && !isUuid(anonymousId)) return { ok: false, error: "anonymous_id must be a lowercase UUID" };
-  if (distinctId != null && !isDistinctId(distinctId)) return { ok: false, error: "distinct_id has a bad format" };
+  const { browserId: A, knownId: D } = names;
+  if (anonymousId != null && !isUuid(anonymousId)) return { ok: false, error: `${A} must be a lowercase UUID` };
+  if (distinctId != null && !isDistinctId(distinctId)) return { ok: false, error: `${D} has a bad format` };
   switch (source) {
     case "browser":
       if (!consent) return { ok: true, ids: { anonymous_id: null, distinct_id: null } };
-      if (anonymousId == null) return { ok: false, error: "anonymous_id is required with consent" };
+      if (anonymousId == null) return { ok: false, error: `${A} is required with consent` };
       return { ok: true, ids: { anonymous_id: anonymousId as string, distinct_id: (distinctId as string) ?? null } };
     case "app":
       if (anonymousId != null) return { ok: false, error: "app events carry no anonymous_id" };
@@ -75,11 +83,14 @@ export function validateGroups(
 export function validateIdentify(
   source: Source,
   body: Record<string, unknown>,
+  names: IdNames = RECORD_NAMES,
 ): { ok: true; anonymous_id: string; distinct_id: string } | { ok: false; error: string } {
-  if (source === "app") return { ok: false, error: "identify comes from the browser or a server" };
-  if (source === "browser" && body.consent !== true) return { ok: false, error: "identify needs consent" };
-  if (!isUuid(body.anonymous_id)) return { ok: false, error: "anonymous_id must be a lowercase UUID" };
-  if (!isDistinctId(body.distinct_id)) return { ok: false, error: "distinct_id has a bad format" };
-  if (body.anonymous_id === body.distinct_id) return { ok: false, error: "anonymous_id and distinct_id are the same" };
-  return { ok: true, anonymous_id: body.anonymous_id, distinct_id: body.distinct_id };
+  const { browserId: A, knownId: D } = names;
+  const a = body[A], d = body[D];
+  if (source === "app") return { ok: false, error: "a link comes from the browser or a server" };
+  if (source === "browser" && body.consent !== true) return { ok: false, error: "a link needs consent" };
+  if (!isUuid(a)) return { ok: false, error: `${A} must be a lowercase UUID` };
+  if (!isDistinctId(d)) return { ok: false, error: `${D} has a bad format` };
+  if (a === d) return { ok: false, error: `${A} and ${D} are the same` };
+  return { ok: true, anonymous_id: a, distinct_id: d };
 }

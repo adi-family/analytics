@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Local collector: the same routes as the Lambda, writing gzip JSONL objects into .dev/
-// with the S3 key layout Firehose uses, so /export behaves as it does in AWS.
+// with the S3 key layout Firehose uses, so GET /v1/pull behaves as it does in AWS.
 //
 //   ANALYTICS_WRITE_KEY=... ANALYTICS_EXPORT_KEY=... bun run dev     (PORT, default 8787)
 
@@ -49,7 +49,7 @@ const handle = createApp({
     },
   },
   store,
-  snippet: await Bun.file(join(import.meta.dir, "..", "dist", "adi.min.js")).text(),
+  snippet: await Bun.file(join(import.meta.dir, "..", "dist", "web.min.js")).text(),
 });
 
 Bun.serve({

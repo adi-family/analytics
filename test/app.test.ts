@@ -40,12 +40,13 @@ function setup(opts: { limiter?: RateLimiter; store?: EventStore } = {}) {
 }
 
 const browser = { origin: "https://withadi.dev", "user-agent": FIREFOX, "content-type": "text/plain" };
-const pv = { consent: true, anonymous_id: AID, events: [{ event: "page_view", properties: { path: "/" } }] };
+const pv = { consent: true, browser_id: AID, items: [{ name: "page_view", props: { path: "/" } }] };
+const appBatch = { distinct_id: INSTALL, events: [{ event: "app_daily_active", properties: { runs_human: 3, runs_agent: 1, runs_automation: 0, version: "1.30.0", os: "linux", arch: "x86_64" } }] };
 
-describe("POST /e", () => {
+describe("POST /v1/web", () => {
   test("accepts site events from an allowed origin and answers with CORS", async () => {
     const { call, stored } = setup();
-    const res = await call("POST", "/e", pv, browser);
+    const res = await call("POST", "/v1/web", pv, browser);
     expect(res.status).toBe(200);
     expect(res.headers["access-control-allow-origin"]).toBe("https://withadi.dev");
     expect(stored[0]).toMatchObject({ event: "page_view", ua_browser: "firefox", ua_os: "linux", anonymous_id: AID });
@@ -53,98 +54,141 @@ describe("POST /e", () => {
 
   test("refuses a foreign origin", async () => {
     const { call, stored } = setup();
-    const res = await call("POST", "/e", pv, { ...browser, origin: "https://evil.example" });
+    const res = await call("POST", "/v1/web", pv, { ...browser, origin: "https://evil.example" });
     expect(res.status).toBe(403);
     expect(res.headers["access-control-allow-origin"]).toBeUndefined();
     expect(stored).toHaveLength(0);
   });
 
-  test("with no Origin it is the desktop app, which may send only app events", async () => {
+  test("takes the plain-word wire format only, strictly", async () => {
     const { call, stored } = setup();
-    expect((await call("POST", "/e", pv)).status).toBe(400);
-    const app = { distinct_id: INSTALL, events: [{ event: "app_daily_active", properties: { runs_human: 3, runs_agent: 1, runs_automation: 0, version: "1.30.0", os: "linux", arch: "x86_64" } }] };
-    expect((await call("POST", "/e", app)).status).toBe(200);
-    expect(stored).toHaveLength(1);
-    expect(stored[0].ua_browser).toBeNull();
+    const old = { consent: true, anonymous_id: AID, events: [{ event: "page_view", properties: { path: "/" } }] };
+    expect(JSON.parse((await call("POST", "/v1/web", old, browser)).body).error).toBe("unknown field anonymous_id");
+    const res = await call("POST", "/v1/web", { items: [{ event: "page_view", props: { path: "/" } }] }, browser);
+    expect(JSON.parse(res.body).rejected[0].errors).toEqual(["unknown field event"]);
+    const bad = await call("POST", "/v1/web", { consent: true, browser_id: "nope", items: pv.items }, browser);
+    expect(JSON.parse(bad.body).rejected[0].errors).toEqual(["browser_id must be a lowercase UUID"]);
+    expect(stored).toHaveLength(0);
+  });
+
+  test("site events with consent keep the ids; without it they are dropped", async () => {
+    const { call, stored } = setup();
+    await call("POST", "/v1/web", { ...pv, known_id: "crm:user:7" }, browser);
+    await call("POST", "/v1/web", { ...pv, consent: false }, browser);
+    expect(stored.map((r) => [r.anonymous_id, r.distinct_id, r.consent])).toEqual([[AID, "crm:user:7", true], [null, null, false]]);
+  });
+
+  test("without an Origin it is refused: that is the app's route", async () => {
+    const { call, stored } = setup();
+    expect((await call("POST", "/v1/web", pv)).status).toBe(403);
+    expect(stored).toHaveLength(0);
   });
 
   test("GPC, DNT and bots are dropped server-side too", async () => {
     const { call, stored } = setup();
-    expect(JSON.parse((await call("POST", "/e", pv, { ...browser, "sec-gpc": "1" })).body)).toEqual({ accepted: 0, dropped: "opt-out" });
-    expect(JSON.parse((await call("POST", "/e", pv, { ...browser, dnt: "1" })).body).dropped).toBe("opt-out");
-    expect(JSON.parse((await call("POST", "/e", pv, { ...browser, "user-agent": "curl/8.0" })).body).dropped).toBe("bot");
+    expect(JSON.parse((await call("POST", "/v1/web", pv, { ...browser, "sec-gpc": "1" })).body)).toEqual({ accepted: 0, dropped: "opt-out" });
+    expect(JSON.parse((await call("POST", "/v1/web", pv, { ...browser, dnt: "1" })).body).dropped).toBe("opt-out");
+    expect(JSON.parse((await call("POST", "/v1/web", pv, { ...browser, "user-agent": "curl/8.0" })).body).dropped).toBe("bot");
     expect(stored).toHaveLength(0);
   });
 
   test("size limit and bad JSON", async () => {
     const { call } = setup();
-    expect((await call("POST", "/e", "x".repeat(40 * 1024), browser)).status).toBe(413);
-    expect((await call("POST", "/e", "{not json", browser)).status).toBe(400);
+    expect((await call("POST", "/v1/web", "x".repeat(40 * 1024), browser)).status).toBe(413);
+    expect((await call("POST", "/v1/web", "{not json", browser)).status).toBe(400);
   });
 
-  test("a write key on /e is refused rather than ignored", async () => {
+  test("a write key on /v1/web is refused rather than ignored", async () => {
     const { call } = setup();
-    expect((await call("POST", "/e", pv, { authorization: `Bearer ${WRITE}` })).status).toBe(401);
+    expect((await call("POST", "/v1/web", pv, { authorization: `Bearer ${WRITE}` })).status).toBe(401);
   });
 
   test("rate limit", async () => {
     const { call } = setup({ limiter: new RateLimiter(1, 2) });
-    expect((await call("POST", "/e", pv, browser)).status).toBe(200);
-    expect((await call("POST", "/e", pv, browser)).status).toBe(200);
-    expect((await call("POST", "/e", pv, browser)).status).toBe(429);
+    expect((await call("POST", "/v1/web", pv, browser)).status).toBe(200);
+    expect((await call("POST", "/v1/web", pv, browser)).status).toBe(200);
+    expect((await call("POST", "/v1/web", pv, browser)).status).toBe(429);
   });
 
   test("nothing about the address is stored", async () => {
     const { call, stored } = setup();
-    await call("POST", "/e", pv, browser);
+    await call("POST", "/v1/web", pv, browser);
     expect(JSON.stringify(stored)).not.toContain("203.0.113.9");
     expect(JSON.stringify(stored)).not.toContain("Firefox/131");
   });
 });
 
-describe("POST /s", () => {
+describe("POST /v1/app", () => {
+  test("the desktop app (no Origin) may send only app events", async () => {
+    const { call, stored } = setup();
+    expect((await call("POST", "/v1/app", appBatch)).status).toBe(200);
+    const site = { events: [{ event: "page_view", properties: { path: "/" } }] };
+    expect(JSON.parse((await call("POST", "/v1/app", site)).body).rejected[0].errors[0]).toContain("cannot be sent here");
+    expect(stored).toHaveLength(1);
+    expect(stored[0].ua_browser).toBeNull();
+  });
+
+  test("a page cannot post app events", async () => {
+    const { call, stored } = setup();
+    expect((await call("POST", "/v1/app", appBatch, browser)).status).toBe(403);
+    expect(stored).toHaveLength(0);
+  });
+});
+
+describe("POST /v1/server", () => {
   const crm = { events: [{ event: "crm_company_added", distinct_id: "crm:company:42", properties: { origin: "inbound" } }] };
 
   test("needs the write key", async () => {
     const { call, stored } = setup();
-    expect((await call("POST", "/s", crm)).status).toBe(401);
-    expect((await call("POST", "/s", crm, { authorization: "Bearer " + "z".repeat(32) })).status).toBe(401);
-    expect((await call("POST", "/s", crm, { authorization: `Bearer ${WRITE}` })).status).toBe(200);
+    expect((await call("POST", "/v1/server", crm)).status).toBe(401);
+    expect((await call("POST", "/v1/server", crm, { authorization: "Bearer " + "z".repeat(32) })).status).toBe(401);
+    expect((await call("POST", "/v1/server", crm, { authorization: `Bearer ${WRITE}` })).status).toBe(200);
     expect(stored).toHaveLength(1);
   });
 });
 
-describe("POST /identify", () => {
-  test("from the site with consent", async () => {
+describe("POST /v1/link", () => {
+  test("from the site with consent, in the browser's wire format", async () => {
     const { call, stored } = setup();
-    const res = await call("POST", "/identify", { consent: true, anonymous_id: AID, distinct_id: INSTALL }, browser);
+    const res = await call("POST", "/v1/link", { consent: true, browser_id: AID, known_id: INSTALL }, browser);
     expect(res.status).toBe(200);
     expect(stored[0]).toMatchObject({ type: "identify", anonymous_id: AID, distinct_id: INSTALL });
   });
 
+  test("from a server with the write key, in record names", async () => {
+    const { call, stored } = setup();
+    const res = await call("POST", "/v1/link", { anonymous_id: AID, distinct_id: "crm:user:7" }, { authorization: `Bearer ${WRITE}` });
+    expect(res.status).toBe(200);
+    expect(stored[0]).toMatchObject({ type: "identify", layer: "server", anonymous_id: AID, distinct_id: "crm:user:7" });
+  });
+
   test("refused without origin or key, and without consent", async () => {
     const { call } = setup();
-    expect((await call("POST", "/identify", { consent: true, anonymous_id: AID, distinct_id: INSTALL })).status).toBe(401);
-    expect((await call("POST", "/identify", { anonymous_id: AID, distinct_id: INSTALL }, browser)).status).toBe(400);
+    expect((await call("POST", "/v1/link", { consent: true, browser_id: AID, known_id: INSTALL })).status).toBe(401);
+    expect((await call("POST", "/v1/link", { browser_id: AID, known_id: INSTALL }, browser)).status).toBe(400);
+    expect((await call("POST", "/v1/link", { consent: true, anonymous_id: AID, distinct_id: INSTALL }, browser)).status).toBe(400);
   });
 });
 
-describe("GET /a.js and /export", () => {
+describe("GET /web.js and /v1/pull", () => {
   test("serves the snippet", async () => {
-    const res = await setup().call("GET", "/a.js");
+    const res = await setup().call("GET", "/web.js");
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("javascript");
   });
 
   test("export needs the export key, not the write key", async () => {
     const { call } = setup();
-    expect((await call("GET", "/export")).status).toBe(401);
-    expect((await call("GET", "/export", "", { authorization: `Bearer ${WRITE}` })).status).toBe(401);
-    expect((await call("GET", "/export", "", { authorization: `Bearer ${EXPORT}` })).status).toBe(200);
+    expect((await call("GET", "/v1/pull")).status).toBe(401);
+    expect((await call("GET", "/v1/pull", "", { authorization: `Bearer ${WRITE}` })).status).toBe(401);
+    expect((await call("GET", "/v1/pull", "", { authorization: `Bearer ${EXPORT}` })).status).toBe(200);
   });
 
-  test("unknown routes 404", async () => {
-    expect((await setup().call("GET", "/")).status).toBe(404);
+  test("unknown routes 404, the old names included", async () => {
+    const { call } = setup();
+    expect((await call("GET", "/")).status).toBe(404);
+    for (const [m, p] of [["POST", "/e"], ["POST", "/s"], ["POST", "/identify"], ["GET", "/a.js"], ["GET", "/export"]])
+      expect((await call(m, p, pv, browser)).status).toBe(404);
   });
 });
 

@@ -51,7 +51,7 @@ describe("app and server identity", () => {
   test("a layer can only be sent from its own source", () => {
     const r = collectBatch("app", { distinct_id: INSTALL, events: [{ event: "crm_company_added", properties: { origin: "inbound" } }] }, { now: NOW, ua: null });
     if (!r.ok) throw new Error(r.error);
-    expect(r.rejected[0].errors[0]).toContain("server-crm event");
+    expect(r.rejected[0].errors[0]).toContain("server-crm layer");
     const s = collectBatch("server", { events: [{ event: "page_view", distinct_id: "x", properties: { path: "/" } }] }, { now: NOW, ua: null });
     if (!s.ok) throw new Error(s.error);
     expect(s.rejected).toHaveLength(1);
@@ -75,7 +75,7 @@ describe("app and server identity", () => {
 
 describe("identify", () => {
   test("browser identify needs consent", () => {
-    expect(collectIdentify("browser", { anonymous_id: AID, distinct_id: INSTALL }, { now: NOW })).toMatchObject({ ok: false, error: "identify needs consent" });
+    expect(collectIdentify("browser", { anonymous_id: AID, distinct_id: INSTALL }, { now: NOW })).toMatchObject({ ok: false, error: "a link needs consent" });
   });
 
   test("links the anonymous id to the known id", () => {

@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build:snippet": "bun build snippet/adi.js --minify --target browser --outfile dist/adi.min.js",
+    "build:snippet": "bun build snippet/web.js --minify --target browser --outfile dist/web.min.js",
     "build": "bun run build:snippet && bun build src/lambda.ts --target node --format esm --minify --external '@aws-sdk/*' --outfile dist/lambda/index.mjs",
     "test": "bun run build:snippet && bun test",
     "typecheck": "tsc --noEmit",

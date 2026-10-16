@@ -1,4 +1,4 @@
-// GET /export?since=<cursor>: hands stored records to ADI incrementally.
+// GET /v1/pull?since=<cursor>: hands stored records to ADI incrementally.
 //
 // Firehose writes gzip JSONL objects under events/dt=YYYY-MM-DD/, named with the time the
 // buffer opened, so object keys sort by time. The cursor is the last key handed out; the

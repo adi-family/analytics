@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-// Pulls new events from the collector's GET /export into a SQLite database, incrementally.
+// Pulls new events from the collector's GET /v1/pull into a SQLite database, incrementally.
 // Run it as often as you like: it resumes from the stored cursor and upserts on the record id,
 // so a repeated page is harmless.
 //
-//   ANALYTICS_URL=https://t.withadi.dev ANALYTICS_EXPORT_KEY=... \
+//   ANALYTICS_URL=https://relay.withadi.dev ANALYTICS_EXPORT_KEY=... \
 //     bun clients/adi-pull.ts "$(adi-db path --project adi-analytics)"
 //
 // Optional: ANALYTICS_SINCE=YYYY-MM-DD for the very first pull (default: everything kept).
@@ -54,7 +54,7 @@ export async function pull(db: Database, opts: { url: string; key: string; since
   );
   let pages = 0, received = 0, added = 0;
   for (;;) {
-    const res = await f(`${opts.url.replace(/\/$/, "")}/export${cursor ? `?since=${encodeURIComponent(cursor)}` : ""}`, {
+    const res = await f(`${opts.url.replace(/\/$/, "")}/v1/pull${cursor ? `?since=${encodeURIComponent(cursor)}` : ""}`, {
       headers: { authorization: `Bearer ${opts.key}` },
     });
     if (!res.ok) throw new Error(`export answered ${res.status}: ${await res.text()}`);

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # The custom hostname, in two steps, with DNS on Cloudflare (records are DNS-only, not proxied):
 #
-#   DOMAIN=t.withadi.dev infra/domain.sh cert   # request the ACM certificate, add its
+#   DOMAIN=relay.withadi.dev infra/domain.sh cert   # request the ACM certificate, add its
 #                                               # validation CNAME, wait until ISSUED
-#   DOMAIN=t.withadi.dev CERT_ARN=... infra/deploy.sh
-#   DOMAIN=t.withadi.dev infra/domain.sh dns    # CNAME DOMAIN -> the API's regional target
+#   DOMAIN=relay.withadi.dev CERT_ARN=... infra/deploy.sh
+#   DOMAIN=relay.withadi.dev infra/domain.sh dns    # CNAME DOMAIN -> the API's regional target
 #
 # Needs CLOUDFLARE_API_TOKEN (Zone:DNS:Edit on the zone) and the AWS CLI. CF_ZONE defaults to
 # the last two labels of DOMAIN.
@@ -12,7 +12,7 @@ set -euo pipefail
 
 STACK="${STACK:-adi-analytics}"
 export AWS_REGION="${AWS_REGION:-eu-central-1}"
-: "${DOMAIN:?set DOMAIN, e.g. t.withadi.dev}"
+: "${DOMAIN:?set DOMAIN, e.g. relay.withadi.dev}"
 : "${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}"
 CF_ZONE="${CF_ZONE:-$(echo "$DOMAIN" | awk -F. '{print $(NF-1)"."$NF}')}"
 CF=https://api.cloudflare.com/client/v4
@@ -66,5 +66,5 @@ case "${1:-}" in
     [ -n "$arn" ] && aws acm delete-certificate --certificate-arn "$arn" && echo "deleted certificate (its validation CNAME is left in place, harmless)"
     ;;
   *)
-    echo "usage: DOMAIN=t.withadi.dev $0 cert|dns|rm" >&2; exit 2 ;;
+    echo "usage: DOMAIN=relay.withadi.dev $0 cert|dns|rm" >&2; exit 2 ;;
 esac

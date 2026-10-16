@@ -13,16 +13,16 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Comma-separated SHA-256 hex hashes of the server write keys (POST /s, server /identify).
+    Description: Comma-separated SHA-256 hex hashes of the server write keys (POST /v1/server, server POST /v1/link).
   ExportKeyHashes:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Comma-separated SHA-256 hex hashes of the export keys (GET /export).
+    Description: Comma-separated SHA-256 hex hashes of the export keys (GET /v1/pull).
   DomainName:
     Type: String
     Default: ""
-    Description: Custom hostname, e.g. t.withadi.dev. Empty = only the execute-api URL.
+    Description: Custom hostname, e.g. relay.withadi.dev. Empty = only the execute-api URL.
   CertificateArn:
     Type: String
     Default: ""
@@ -230,35 +230,41 @@ Resources:
       IntegrationUri: !GetAtt CollectorFunction.Arn
       PayloadFormatVersion: "2.0"
 
-  RouteEvents:
+  RouteWeb:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: POST /e
+      RouteKey: POST /v1/web
+      Target: !Sub "integrations/${CollectorIntegration}"
+  RouteApp:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/app
       Target: !Sub "integrations/${CollectorIntegration}"
   RouteServer:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: POST /s
+      RouteKey: POST /v1/server
       Target: !Sub "integrations/${CollectorIntegration}"
-  RouteIdentify:
+  RouteLink:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: POST /identify
+      RouteKey: POST /v1/link
       Target: !Sub "integrations/${CollectorIntegration}"
-  RouteExport:
+  RoutePull:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: GET /export
+      RouteKey: GET /v1/pull
       Target: !Sub "integrations/${CollectorIntegration}"
-  RouteSnippet:
+  RouteScript:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
-      RouteKey: GET /a.js
+      RouteKey: GET /web.js
       Target: !Sub "integrations/${CollectorIntegration}"
   RouteHealth:
     Type: AWS::ApiGatewayV2::Route
